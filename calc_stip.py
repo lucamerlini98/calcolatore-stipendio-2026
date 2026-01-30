@@ -612,7 +612,7 @@ fig = px.line(
         "Detrazioni",
         "Agevolazioni"
     ],
-    title="Andamento Netto in Busta vs Lordo",
+    title="Andamento Netto Annuale vs Lordo",
     labels={
         "value": "Euro (€)",
         "variable": "Voce"
@@ -800,5 +800,6 @@ st.plotly_chart(fig, use_container_width=True)
 # Footer
 st.markdown("---")
 st.markdown("<p style='text-align:center; color:gray;'>© 2026, Luca Merlini</p>", unsafe_allow_html=True)
+
 
 
