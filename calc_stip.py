@@ -149,7 +149,9 @@ def calcola_dettagli(
     premio_flat_perc,      # usato solo se flat
     welfare,
 
-    giorni_lavorati
+    giorni_lavorati,
+    orario_settimanale,
+    giorni_ferie
 ):
     # =========================
     # 1. CONTRIBUTI INPS
@@ -278,6 +280,19 @@ def calcola_dettagli(
 
     tasse_totali = imposta_lorda_totale
 
+    # =========================
+    # 15. NETTO ORARIO
+    # =========================
+    GIORNI_LAVORATIVI_STANDARD = 253
+
+    giorni_effettivi = GIORNI_LAVORATIVI_STANDARD - giorni_ferie
+    ore_giornaliere = orario_settimanale / 5
+
+    ore_lavorate_annue = giorni_effettivi * ore_giornaliere
+
+    netto_orario = netto_busta / ore_lavorate_annue
+
+
     return {
         "Stipendio Lordo": ral,
         "Reddito Imponibile Fiscale": imponibile,
@@ -288,6 +303,7 @@ def calcola_dettagli(
         "Agevolazioni": agevolazioni,
         "Tasse Totali": tasse_totali,
         "Stipendio Netto": netto_busta,
+        "Stipendio Netto Orario": netto_orario,
         "Buoni Pasto Annui": buoni_annui,
         "Buoni Pasto Mensili": buoni_mensili,
         "Stipendio Netto con buoni": netto_totale,
@@ -388,6 +404,24 @@ with col4:
         value=0.8,
         step=0.1,
         help="Es. Milano 0.8%"
+    )
+col1, col2 = st.columns(2)
+
+with col1:
+    orario_settimanale = st.number_input(
+        "Ore settimanali",
+        min_value=1.0,
+        max_value=120.0,
+        value=40.0,
+        step=0.5
+    )
+with col2:
+    giorni_ferie = st.number_input(
+        "Giorni di ferie e permessi annui",
+        min_value=0,
+        max_value=100,
+        value=26,
+        step=1
     )
 
 # -------------------------
@@ -536,7 +570,9 @@ dati = calcola_dettagli(
     premio_modalita=premio_modalita_val,
     premio_flat_perc=premio_flat_perc,
     welfare=welfare,
-    giorni_lavorati=giorni_lavoro
+    giorni_lavorati=giorni_lavoro,
+    orario_settimanale=orario_settimanale,
+    giorni_ferie=giorni_ferie
 )
 
 # -------------------------
@@ -566,6 +602,7 @@ col2.metric(
 st.divider()
 st.write(f"**Reddito imponibile fiscale:** {dati['Reddito Imponibile Fiscale']:.2f} €")
 st.write(f"**Netto annuale:** {dati['Stipendio Netto']:.2f} €")
+st.write(f"**Netto orario:** {dati['Stipendio Netto Orario']:.2f} €")
 st.write(f"**Tasse totali:** {dati['Tasse Totali']:.2f} €")
 st.write(f"**Detrazioni:** {dati['Detrazioni']:.2f} €")
 st.write(f"**Buoni pasto annui:** {dati['Buoni Pasto Annui']:.2f} €")
@@ -598,7 +635,10 @@ df = pd.DataFrame([
         premio_modalita,
         premio_flat_perc,
         welfare,
-        giorni_lavoro
+        giorni_lavoro,
+        orario_settimanale,
+        giorni_ferie
+
     )
     for l in range(1000, 80001, 1000)
 ])
@@ -667,7 +707,10 @@ for i in range(NUM_RIGHE):
             premio_modalita,
             premio_flat_perc,
             welfare,
-            giorni_lavoro
+            giorni_lavoro,
+            orario_settimanale,
+            giorni_ferie
+
         )
 
         netto_busta = float(dati_row["Stipendio Netto"])
@@ -688,6 +731,7 @@ for i in range(NUM_RIGHE):
         "Netto annuale": netto_busta,
         "Differenza marginale netto": diff_marginale,
         f"Netto su {mensilita} mensilità": netto_busta / mensilita,
+        "Netto orario": dati_row["Stipendio Netto Orario"],
         "Tasse": dati_row["Tasse Totali"],
         "Detrazioni": dati_row["Detrazioni"],
         "Agevolazioni": dati_row["Agevolazioni"]
@@ -753,7 +797,14 @@ ricchezza_generata = (
 
 ricchezza_mensile = ricchezza_generata / 12
 
-col1, col2= st.columns(2)
+giorni_effettivi = 253 - giorni_ferie
+ore_giornaliere = orario_settimanale / 5
+ore_lavorate_annue = giorni_effettivi * ore_giornaliere
+ricchezza_oraria = ricchezza_generata / ore_lavorate_annue
+
+# ricchezza_oraria = ricchezza_generata / ((253 - giorni_ferie) * (orario_settimanale / 5))
+
+col1, col2, col3 = st.columns(3)
 
 col1.metric(
     "💎 Ricchezza Generata Annua",
@@ -764,6 +815,12 @@ col2.metric(
     "Ricchezza Generata Mensile",
     f"{ricchezza_mensile:,.2f} €"
 )
+
+col3.metric(
+    "Ricchezza Generata Oraria",
+    f"{ricchezza_oraria:,.2f} € /h"
+)
+
 
 import plotly.graph_objects as go
 
@@ -800,6 +857,5 @@ st.plotly_chart(fig, use_container_width=True)
 # Footer
 st.markdown("---")
 st.markdown("<p style='text-align:center; color:gray;'>© 2026, Luca Merlini</p>", unsafe_allow_html=True)
-
 
 
