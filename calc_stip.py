@@ -6,6 +6,7 @@ import plotly.express as px
 # ADDIZIONALI REGIONALI
 # ======================
 
+
 ALIQUOTE_REGIONALI = {
     "Lazio": [
         (15000, 0.0173),
@@ -35,10 +36,10 @@ ALIQUOTE_REGIONALI = {
         (float("inf"), 0.0173)
     ],
     "Molise": [
-        (15000, 0.0203),
-        (28000, 0.0223),
-        (50000, 0.0363),
-        (float("inf"), 0.0363)
+        (15000, 0.0173),
+        (28000, 0.0193),
+        (50000, 0.0333),
+        (float("inf"), 0.0333)
     ],
     "Friuli Venezia Giulia": [
         (15000, 0.0070),
@@ -72,8 +73,8 @@ ALIQUOTE_REGIONALI = {
     ],
     "Piemonte": [
         (15000, 0.0162),
-        (28000, 0.0213),
-        (50000, 0.0275),
+        (28000, 0.0268),
+        (50000, 0.0331),
         (float("inf"), 0.0333)
     ],
     "Abruzzo": [
@@ -87,7 +88,7 @@ ALIQUOTE_REGIONALI = {
     "Emilia-Romagna": [
         (15000, 0.0133),
         (28000, 0.0193),
-        (50000, 0.0293),
+        (50000, 0.0278),
         (float("inf"), 0.0333)
     ],
     "Toscana": [
@@ -107,165 +108,198 @@ ALIQUOTE_REGIONALI = {
     ]
 }
 
-
 def calcola_addizionale_regionale(regione: str, reddito_imponibile: float) -> float:
     """
-    Calcola l'addizionale regionale IRPEF in base alla regione e al reddito imponibile.
-    Gestisce automaticamente regioni a 1, 2, 3 o 4 scaglioni.
+    Addizionale regionale IRPEF:
+    aliquota UNICA in base alla fascia di reddito.
+    NON è progressiva.
     """
     if regione not in ALIQUOTE_REGIONALI:
         return 0.0
 
-    scaglioni = ALIQUOTE_REGIONALI[regione]
-    imposta = 0.0
-    precedente = 0.0
+    for soglia, aliquota in ALIQUOTE_REGIONALI[regione]:
+        if reddito_imponibile <= soglia:
+            return reddito_imponibile * aliquota
 
-    for soglia, aliquota in scaglioni:
-        if reddito_imponibile > soglia:
-            imposta += (soglia - precedente) * aliquota
-            precedente = soglia
-        else:
-            imposta += (reddito_imponibile - precedente) * aliquota
-            break
+    return 0.0
 
-    return imposta
+
 
 # -------------------------
 # Funzione per calcolare il netto
 # -------------------------
 def calcola_dettagli(
-    stipendio_lordo, regione, addizionale_comunale_perc, mensilita, tipo_contratto,
-    buoni_pasto_giornalieri, giorni_buoni_pasto,
+    ral,
+    regione,
+    addizionale_comunale_perc,
+    mensilita,
+    tipo_contratto,
+
+    buono_giornaliero,
+    giorni_buoni,
+
     assicurazione_sanitaria_perc,
-    fondo_pensione_val, fondo_pensione_perc,
+
+    fondo_pensione_val,
+    fondo_pensione_perc,
     contributo_datore_perc,
-    giorni_lavoro
+
+    premio_risultato,
+    premio_modalita,   # "flat" o "irpef"
+    premio_flat_perc,      # usato solo se flat
+    welfare,
+
+    giorni_lavorati
 ):
     # =========================
-    # 1. REDDITO IMPONIBILE CONTRIBUTIVO (INPS)
+    # 1. CONTRIBUTI INPS
     # =========================
-    if tipo_contratto.lower() == "apprendistato":
-        reddito_imponibile_contributivo = stipendio_lordo * (1 - 0.0584)
-    else:
-        reddito_imponibile_contributivo = stipendio_lordo * (1 - 0.0919)
+    aliquota_inps = 0.0584 if tipo_contratto.lower() == "apprendistato" else 0.0919
+    contributi_inps = ral * aliquota_inps
 
     # =========================
-    # 2. FONDO PENSIONE
+    # 2. TFR
     # =========================
+    tfr = ral / 13.5 - ral * 0.005
+
+    # =========================
+    # 3. FONDO PENSIONE (deducibile)
+    # =========================
+    base_fondo = ral - contributi_inps
     if fondo_pensione_val is not None:
         contributo_volontario = fondo_pensione_val
     elif fondo_pensione_perc is not None:
-        contributo_volontario = stipendio_lordo * (fondo_pensione_perc / 100)
+        contributo_volontario = base_fondo * fondo_pensione_perc / 100
     else:
         contributo_volontario = 0.0
 
-    contributo_datore = stipendio_lordo * (contributo_datore_perc / 100)
-    fondo_pensione_totale = contributo_volontario + contributo_datore
+    contributo_datore = base_fondo * contributo_datore_perc / 100
+    fondo_totale = contributo_volontario + contributo_datore
 
     # =========================
-    # 3. ALTRI ONERI DEDUCIBILI
+    # 4. ASSICURAZIONE SANITARIA
     # =========================
-    costo_assicurazione = stipendio_lordo * (assicurazione_sanitaria_perc / 100)
+    assicurazione = ral * assicurazione_sanitaria_perc / 100
 
     # =========================
-    # 4. REDDITO IMPONIBILE FISCALE
+    # 5. PREMIO VARIABILE
     # =========================
-    reddito_imponibile = max(
-        0.0,
-        reddito_imponibile_contributivo
-        - contributo_volontario
-        - costo_assicurazione
-    )
-
-    irpef = add_reg = add_com = detrazioni = agevolazioni = 0.0
-
-    # =========================
-    # 5. CALCOLO TASSE
-    # =========================
-    if reddito_imponibile < 8500:
-        tasse_totali = 0.0
-        agevolazioni = reddito_imponibile * 0.071
-        stipendio_netto_busta = reddito_imponibile + agevolazioni
+    if premio_modalita == "irpef":
+        ral_effettiva = ral + premio_risultato
+        premio_netto = 0  # viene tassato insieme alla RAL
     else:
-        if reddito_imponibile <= 28000:
-            irpef = reddito_imponibile * 0.23
-        elif reddito_imponibile <= 50000:
-            irpef = (28000 * 0.23) + ((reddito_imponibile - 28000) * 0.33)
+        ral_effettiva = ral
+        premio_netto = premio_risultato * (1 - premio_flat_perc / 100)
+
+    # =========================
+    # 6. IMPONIBILE IRPEF
+    # =========================
+    imponibile = max(0, ral_effettiva - contributi_inps - contributo_volontario - assicurazione)
+
+    # =========================
+    # 7. IRPEF
+    # =========================
+    if imponibile <= 28000:
+        irpef_lorda = imponibile * 0.23
+    elif imponibile <= 50000:
+        irpef_lorda = 28000 * 0.23 + (imponibile - 28000) * 0.33
+    else:
+        irpef_lorda = 28000 * 0.23 + 22000 * 0.33 + (imponibile - 50000) * 0.43
+
+    # =========================
+    # 8. ADDIZIONALI
+    # =========================
+    add_regionale = calcola_addizionale_regionale(regione, imponibile)
+    add_comunale = imponibile * addizionale_comunale_perc / 100
+
+    if imponibile <= 8500:
+        imposta_lorda_totale = 0
+    else:
+        imposta_lorda_totale = irpef_lorda + add_regionale + add_comunale
+
+    # =========================
+    # 9. DETRAZIONI LAVORO + BONUS RENZI
+    # =========================
+
+    if imponibile < 8500:
+        detrazioni = 0
+    elif imponibile <= 15000:
+        detrazioni = 1955 + 1200
+    elif imponibile <= 28000:
+        detrazioni = 1910 + 1190 * (28000 - imponibile) / 13000
+    elif imponibile <= 50000:
+        detrazioni = 1910 * (50000 - imponibile) / 22000
+    else:
+        detrazioni = 0
+
+    detrazioni *= giorni_lavorati / 365
+
+    # =========================
+    # 10. AGEVOLAZIONI
+    # =========================
+
+    if imponibile <= 20000:
+        if imponibile <= 8500:
+            agevolazioni = imponibile * 0.071
+        elif imponibile <= 15000:
+            agevolazioni = imponibile * 0.053
         else:
-            irpef = (
-                (28000 * 0.23)
-                + (22000 * 0.35)
-                + ((reddito_imponibile - 50000) * 0.43)
-            )
-
-        add_reg = calcola_addizionale_regionale(regione, reddito_imponibile)
-        add_com = reddito_imponibile * (addizionale_comunale_perc / 100)
-
-        tasse_totali = irpef + add_reg + add_com
-
-        # =========================
-        # 6. DETRAZIONI
-        # =========================
-        if reddito_imponibile <= 15000:
-            detrazioni = max(1955, 690) + 1200
-        elif reddito_imponibile <= 28000:
-            detrazioni = 1910 + 1190 * (28000 - reddito_imponibile) / (28000 - 15000)
-        elif reddito_imponibile <= 50000:
-            detrazioni = 1910 * (50000 - reddito_imponibile) / (50000 - 28000)
-
-        # =========================
-        # 6.1. AGEVOLAZIONI
-        # =========================
-        # if reddito_imponibile <= 20000:
-        #     agevolazioni = reddito_imponibile * 0.048
-        # elif reddito_imponibile <= 32000:
-        #     agevolazioni = 1000
-        # elif reddito_imponibile <= 40000:
-        #     agevolazioni = 1000 * (40000 - reddito_imponibile) / (40000 - 32000)
-
-        stipendio_netto_busta = (
-            reddito_imponibile - tasse_totali + detrazioni + agevolazioni
-        )
+            agevolazioni = imponibile * 0.048
+    elif imponibile <= 32000:
+        agevolazioni = 1000
+    elif imponibile <= 40000:
+        agevolazioni = 1000 * (40000 - imponibile) / 8000
+    else:
+        agevolazioni = 0.0
 
     # =========================
-    # 7. BUONI PASTO
+    # 11. IMPOSTA NETTA
     # =========================
-    buoni_pasto_annui = buoni_pasto_giornalieri * giorni_buoni_pasto
-    buoni_pasto_mensili = buoni_pasto_annui / 12
+    imposta_netta = max(0, imposta_lorda_totale - detrazioni) - agevolazioni
+
+    # imposta_netta =  imposta_lorda_totale - detrazioni - agevolazioni
 
     # =========================
-    # 8. NETTI FINALI
+    # 12. NETTO BUSTA
     # =========================
-    stipendio_netto_totale = stipendio_netto_busta + buoni_pasto_annui
-    stipendio_netto_mensile = stipendio_netto_totale / mensilita
+    netto_busta = imponibile - imposta_netta
 
     # =========================
-    # 9. OUTPUT
+    # 13. BUONI PASTO
     # =========================
+    buoni_annui = buono_giornaliero * giorni_buoni
+    buoni_mensili = buoni_annui / 12
+
+    # =========================
+    # 14. NETTO TOTALE E MENSILE
+    # =========================
+    netto_totale = netto_busta + buoni_annui + welfare + (premio_netto if premio_modalita=="flat" else 0)
+    netto_mensile = netto_busta / mensilita
+
+    tasse_totali = imposta_lorda_totale
+
     return {
-        "Stipendio Lordo": stipendio_lordo,
-        "Reddito Imponibile Contributivo": reddito_imponibile_contributivo,
-        "Reddito Imponibile Fiscale": reddito_imponibile,
-        "Stipendio Netto (senza buoni)": stipendio_netto_busta,
-        "Stipendio Netto Totale": stipendio_netto_totale,
-        "Stipendio Netto Mensile": stipendio_netto_mensile,
-        "Buoni Pasto Annui": buoni_pasto_annui,
-        "Buoni Pasto Mensili": buoni_pasto_mensili,
-        "IRPEF": irpef,
-        "Addizionale Regionale": add_reg,
-        "Addizionale Comunale": add_com,
-        "Tasse Totali": tasse_totali,
+        "Stipendio Lordo": ral,
+        "Reddito Imponibile Fiscale": imponibile,
+        "IRPEF Lorda": irpef_lorda,
+        "Addizionale Regionale": add_regionale,
+        "Addizionale Comunale": add_comunale,
         "Detrazioni": detrazioni,
         "Agevolazioni": agevolazioni,
-        "Contributo Volontario Fondo Pensione": contributo_volontario,
-        "Contributo Datoriale Fondo Pensione": contributo_datore,
-        "Fondo Pensione Totale": fondo_pensione_totale,
-        "Costo Assicurazione Sanitaria": costo_assicurazione,
-        "Tipo Contratto": tipo_contratto,
+        "Tasse Totali": tasse_totali,
+        "Stipendio Netto": netto_busta,
+        "Buoni Pasto Annui": buoni_annui,
+        "Buoni Pasto Mensili": buoni_mensili,
+        "Stipendio Netto con buoni": netto_totale,
+        "Stipendio Netto Mensile": netto_mensile,
+        "Fondo Pensione Totale": fondo_totale,
+        "TFR": tfr,
+        "Premio Netto": premio_netto,
+        "Welfare": welfare,
         "Regione": regione,
-        "Giorni Lavoro": giorni_lavoro,
-        "Giorni Buoni Pasto": giorni_buoni_pasto
+        "Tipo Contratto": tipo_contratto
     }
+
 
 
 # -------------------------
@@ -308,7 +342,6 @@ mensilita = col2.number_input(
     step=1,
     value=13
 )
-
 # -------------------------
 # Dati contrattuali
 # -------------------------
@@ -317,7 +350,8 @@ col1, col2 = st.columns(2)
 with col1:
     tipo_contratto = st.selectbox(
         "Tipo di Contratto",
-        ["Apprendistato", "Determinato", "Indeterminato"]
+        ["Indeterminato", "Apprendistato", "Determinato"],
+        index=0  # default Indeterminato
     )
 
 with col2:
@@ -335,14 +369,15 @@ with col3:
     regione = st.selectbox(
         "Regione di Residenza",
         [
-            "Abruzzo", "Basilicata", "Calabria", "Campania",
+            "Lombardia", "Abruzzo", "Basilicata", "Calabria", "Campania",
             "Emilia-Romagna", "Friuli Venezia Giulia", "Lazio",
-            "Liguria", "Lombardia", "Marche", "Molise",
+            "Liguria", "Marche", "Molise",
             "Piemonte", "Puglia", "Sardegna", "Sicilia",
             "Toscana", "Provincia Autonoma di Trento",
             "Provincia Autonoma di Bolzano", "Umbria",
             "Valle d’Aosta", "Veneto"
-        ]
+        ],
+        index=0  
     )
 
 with col4:
@@ -360,9 +395,7 @@ with col4:
 # -------------------------
 st.subheader("💼 Benefit e contributi opzionali")
 
-# ---- Buoni pasto (DOPPIA CELLA)
 col1, col2 = st.columns(2)
-
 with col1:
     buoni_pasto = st.number_input(
         "Importo buono pasto giornaliero (€)",
@@ -370,7 +403,6 @@ with col1:
         value=8.0,
         step=0.1
     )
-
 with col2:
     giorni_buoni_pasto = st.number_input(
         "Giorni annuali con buono pasto",
@@ -380,12 +412,46 @@ with col2:
         step=1
     )
 
-assicurazione_sanitaria_perc = st.number_input(
-    "Costo assicurazione sanitaria (% del reddito lordo)",
-    min_value=0.0,
-    value=0.0,
-    step=0.1
+premio_modalita = st.radio(
+    "Modalità tassazione premio di risultato/ Variabile:",
+    ("Flat (tassazione fissa)", "Aggiunto alla RAL"),
+    horizontal=True
 )
+if premio_modalita == "Flat (tassazione fissa)":
+    premio_modalita_val = "flat"
+else:
+    premio_modalita_val = "irpef"
+
+
+
+col1, col2 = st.columns(2)
+with col1:
+    premio_risultato = st.number_input(
+        "Premio / Variabile (€ annuo)",
+        min_value=0.0,
+        value=0.0,
+        step=100.0
+    )
+    welfare = st.number_input(
+        "Importo Welfare detassato (€ annuo)",
+        min_value=0.0,
+        value=0.0,
+        step=50.0
+    )
+with col2:
+    premio_flat_perc = st.number_input(
+        "Tassazione premio (%)",
+        min_value=0.0,
+        max_value=50.0,
+        value=1.0,
+        step=1.0
+    )
+    assicurazione_sanitaria_perc = st.number_input(
+        "Costo assicurazione sanitaria (% del reddito lordo)",
+        min_value=0.0,
+        value=0.0,
+        step=0.1
+    )
 
 # -------------------------
 # Fondo pensione
@@ -398,47 +464,79 @@ modo_fondo = st.radio(
     horizontal=True
 )
 
-if modo_fondo == "Importo fisso (€ annuo)":
-    fondo_pensione_val = st.number_input(
-        "Importo volontario annuo (€)",
-        min_value=0.0,
-        value=0.0,
-        step=50.0
+col1, col2 = st.columns(2)
+with col1:
+    if modo_fondo == "Importo fisso (€ annuo)":
+        fondo_pensione_val = st.number_input(
+            "Importo volontario annuo (€)",
+            min_value=0.0,
+            value=0.0,
+            step=50.0
+        )
+        fondo_pensione_perc = None
+    else:
+        fondo_pensione_val = None
+        fondo_pensione_perc = st.number_input(
+            "Percentuale volontaria della RAL (%)",
+            min_value=0.0,
+            value=2.0,
+            step=0.1
     )
-    fondo_pensione_perc = None
-else:
-    fondo_pensione_val = None
-    fondo_pensione_perc = st.number_input(
-        "Percentuale volontaria della RAL (%)",
+with col2:
+    contributo_datore_perc = st.number_input(
+        "Contributo datoriale (% della RAL)",
         min_value=0.0,
-        value=2.0,
+        max_value=10.0,
+        value=0.0,
         step=0.1
     )
 
-contributo_datore_perc = st.number_input(
-    "Contributo datoriale (% della RAL)",
-    min_value=0.0,
-    max_value=10.0,
-    value=1.0,
-    step=0.1
-)
+# =========================
+# Calcolo deducibilità fondo pensione
+# =========================
+# base_fondo = RAL - INPS
+base_fondo = lordo_input * (1 - (0.0584 if tipo_contratto.lower() == "apprendistato" else 0.0919))
+if fondo_pensione_val is not None:
+    contrib_vol = fondo_pensione_val
+elif fondo_pensione_perc is not None:
+    contrib_vol = base_fondo * fondo_pensione_perc / 100
+else:
+    contrib_vol = 0.0
+
+contrib_datore = base_fondo * contributo_datore_perc / 100
+fondo_totale = contrib_vol + contrib_datore
+
+# soglia deducibilità 2026
+soglia_deducibile = 5300
+
+# messaggio colorato
+if fondo_totale <= soglia_deducibile:
+    restante = soglia_deducibile - fondo_totale
+    st.markdown(f"<span style='color:green'>Deducibile ✅, puoi ancora dedurre {restante:.2f} €</span>", unsafe_allow_html=True)
+else:
+    eccedenza = fondo_totale - soglia_deducibile
+    st.markdown(f"<span style='color:red'>Supera la soglia di 5.300€ ❌, eccedenza {eccedenza:.2f} €</span>", unsafe_allow_html=True)
 
 # -------------------------
 # Calcolo
 # -------------------------
 dati = calcola_dettagli(
-    lordo_input,
-    regione,
-    addizionale_comunale_perc,
-    mensilita,
-    tipo_contratto,
-    buoni_pasto,
-    giorni_buoni_pasto,
-    assicurazione_sanitaria_perc,
-    fondo_pensione_val,
-    fondo_pensione_perc,
-    contributo_datore_perc,
-    giorni_lavoro
+    ral=lordo_input,
+    regione=regione,
+    addizionale_comunale_perc=addizionale_comunale_perc,
+    mensilita=mensilita,
+    tipo_contratto=tipo_contratto,
+    buono_giornaliero=buoni_pasto,
+    giorni_buoni=giorni_buoni_pasto,
+    assicurazione_sanitaria_perc=assicurazione_sanitaria_perc,
+    fondo_pensione_val=fondo_pensione_val,
+    fondo_pensione_perc=fondo_pensione_perc,
+    contributo_datore_perc=contributo_datore_perc,
+    premio_risultato=premio_risultato,
+    premio_modalita=premio_modalita_val,
+    premio_flat_perc=premio_flat_perc,
+    welfare=welfare,
+    giorni_lavorati=giorni_lavoro
 )
 
 # -------------------------
@@ -451,26 +549,23 @@ st.metric(
     f"{dati['Stipendio Netto Mensile']:.2f} €"
 )
 
-col1, col2, col3 = st.columns(3)
+col1, col2= st.columns(2)
+
+
 
 col1.metric(
-    "Netto in busta (mensile)",
-    f"{dati['Stipendio Netto (senza buoni)'] / mensilita:.2f} €"
-)
-
-col2.metric(
     "Buoni pasto mensili",
     f"{dati['Buoni Pasto Mensili']:.2f} €"
 )
 
-col3.metric(
-    "Totale benefit + busta",
-    f"{(dati['Stipendio Netto (senza buoni)'] / mensilita + dati['Buoni Pasto Mensili']):.2f} €"
+col2.metric(
+    "Buoni pasto + busta paga",
+    f"{(dati['Stipendio Netto'] / mensilita + dati['Buoni Pasto Mensili']):.2f} €"
 )
 
 st.divider()
 
-st.write(f"**Netto annuale in busta:** {dati['Stipendio Netto (senza buoni)']:.2f} €")
+st.write(f"**Netto annuale in busta:** {dati['Stipendio Netto']:.2f} €")
 st.write(f"**Buoni pasto annui:** {dati['Buoni Pasto Annui']:.2f} €")
 st.write(f"**Tasse totali:** {dati['Tasse Totali']:.2f} €")
 st.write(f"**Detrazioni:** {dati['Detrazioni']:.2f} €")
@@ -478,6 +573,9 @@ st.write(
     f"**Fondo pensione totale:** {dati['Fondo Pensione Totale']:.2f} € "
     f"(Volontario + Datore)"
 )
+st.write(f"**TFR stimato:** {dati['TFR']:.2f} €")
+st.write(f"**Premio Netto:** {dati['Premio Netto']:.2f} €")
+st.write(f"**Welfare detassato:** {dati['Welfare']:.2f} €")
 st.write(f"**Reddito imponibile fiscale:** {dati['Reddito Imponibile Fiscale']:.2f} €")
 st.write(f"**Regione:** {dati['Regione']} — **Contratto:** {dati['Tipo Contratto']}")
 
@@ -497,6 +595,10 @@ df = pd.DataFrame([
         fondo_pensione_val,
         fondo_pensione_perc,
         contributo_datore_perc,
+        premio_risultato,
+        premio_modalita,
+        premio_flat_perc,
+        welfare,
         giorni_lavoro
     )
     for l in range(1000, 80001, 1000)
@@ -505,11 +607,21 @@ df = pd.DataFrame([
 fig = px.line(
     df,
     x="Stipendio Lordo",
-    y=["Stipendio Netto Totale", "Tasse Totali"],
-    title="Andamento Netto vs Lordo"
+    y=[
+        "Stipendio Netto", 
+        "Tasse Totali",
+        "Detrazioni",
+        "Agevolazioni"
+    ],
+    title="Andamento Netto in Busta vs Lordo",
+    labels={
+        "value": "Euro (€)",
+        "variable": "Voce"
+    }
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
 
 # -------------------------
 # Tabella simulazione RAL
@@ -533,60 +645,159 @@ step_ral = col2.number_input(
 )
 
 NUM_RIGHE = 50
-
 risultati = []
 netto_precedente = None
 
 for i in range(NUM_RIGHE):
     ral_corrente = ral_iniziale + i * step_ral
 
-    dati_row = calcola_dettagli(
-        ral_corrente,
-        regione,
-        addizionale_comunale_perc,
-        mensilita,
-        tipo_contratto,
-        buoni_pasto,
-        giorni_buoni_pasto,
-        assicurazione_sanitaria_perc,
-        fondo_pensione_val,
-        fondo_pensione_perc,
-        contributo_datore_perc,
-        giorni_lavoro
-    )
+    try:
+        dati_row = calcola_dettagli(
+            ral_corrente,
+            regione,
+            addizionale_comunale_perc,
+            mensilita,
+            tipo_contratto,
+            buoni_pasto,
+            giorni_buoni_pasto,
+            assicurazione_sanitaria_perc,
+            fondo_pensione_val,
+            fondo_pensione_perc,
+            contributo_datore_perc,
+            premio_risultato,
+            premio_modalita,
+            premio_flat_perc,
+            welfare,
+            giorni_lavoro
+        )
 
-    netto_attuale = dati_row["Stipendio Netto Totale"]
+        netto_busta = float(dati_row["Stipendio Netto"])
+
+    except Exception:
+        # salta le righe che danno problemi (RAL bassi, imponibile negativo, ecc.)
+        continue
 
     # Differenza marginale
     if netto_precedente is None:
         diff_marginale = None
     else:
-        diff_marginale = netto_attuale - netto_precedente
+        diff_marginale = netto_busta - netto_precedente
 
     risultati.append({
-        "Stipendio Lordo": ral_corrente,
-        "Reddito Imponibile Fiscale": dati_row["Reddito Imponibile Fiscale"],
-        "Stipendio Netto Totale": netto_attuale,
-        "Tasse Totali": dati_row["Tasse Totali"],
+        "RAL": ral_corrente,
+        "Imponibile fiscale": dati_row["Reddito Imponibile Fiscale"],
+        "Netto annuale": netto_busta,
+        "Differenza marginale netto": diff_marginale,
+        f"Netto su {mensilita} mensilità": netto_busta / mensilita,
+        "Tasse": dati_row["Tasse Totali"],
         "Detrazioni": dati_row["Detrazioni"],
-        "Differenza Marginale Netto": diff_marginale,
-        f"Stipendio Netto Mensile su {mensilita}": netto_attuale / mensilita
+        "Agevolazioni": dati_row["Agevolazioni"]
     })
 
-    netto_precedente = netto_attuale
+    netto_precedente = netto_busta
 
-df_simulazione = pd.DataFrame(risultati)
 
-# Formattazione più leggibile
-df_simulazione = df_simulazione.round(2)
+df_simulazione = pd.DataFrame(risultati).round(2)
 
-st.dataframe(
-    df_simulazione,
-    use_container_width=True,
-    hide_index=True
+st.dataframe(df_simulazione, use_container_width=True, hide_index=True)
+
+
+st.subheader("💎 Ricchezza Generata")
+
+st.markdown("""
+**Quanto questo lavoro ti rende, non solo quanto ti paga.**
+
+Non tutto quello che ricevi dal tuo lavoro vale come denaro liquido:
+- 1€ in buoni pasto non vale come 1€ sul conto
+- 1€ nel fondo pensione vale di più fiscalmente, ma è meno liquido
+- il TFR è denaro futuro
+
+Qui puoi dire al sistema **quanto per te vale davvero 1€ in ciascuna voce**.
+Il risultato è un unico numero che rappresenta la **ricchezza reale generata dal lavoro**.
+""")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    coeff_buoni = st.number_input(
+        "Valore buoni pasto (1€ = …)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.95,
+        step=0.01
+    )
+
+with col2:
+    coeff_welfare = st.number_input(
+        "Valore welfare (1€ = …)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.95,
+        step=0.01
+    )
+
+with col3:
+    coeff_futuro = st.number_input(
+        "Valore fondo pensione + TFR (1€ = …)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.85,
+        step=0.01
+    )
+
+ricchezza_generata = (
+    dati["Stipendio Netto"]
+    + dati["Buoni Pasto Annui"] * coeff_buoni
+    + dati["Welfare"] * coeff_welfare
+    + (dati["Fondo Pensione Totale"] + dati["TFR"]) * coeff_futuro
 )
+
+ricchezza_mensile = ricchezza_generata / 12
+
+col1, col2= st.columns(2)
+
+col1.metric(
+    "💎 Ricchezza Generata Annua",
+    f"{ricchezza_generata:,.2f} €"
+)
+
+col2.metric(
+    "Ricchezza Generata Mensile",
+    f"{ricchezza_mensile:,.2f} €"
+)
+
+import plotly.graph_objects as go
+
+valori = [
+    dati["Stipendio Netto"],
+    dati["Buoni Pasto Annui"] * coeff_buoni,
+    dati["Welfare"] * coeff_welfare,
+    (dati["Fondo Pensione Totale"] + dati["TFR"]) * coeff_futuro
+]
+
+etichette = [
+    "Netto in busta",
+    "Buoni pasto (scontati)",
+    "Welfare (scontato)",
+    "Fondo pensione + TFR (scontati)"
+]
+
+fig = go.Figure(
+    data=[go.Pie(
+        labels=etichette,
+        values=valori,
+        hole=0.5
+    )]
+)
+
+fig.update_layout(
+    title="Composizione della Ricchezza Generata",
+    showlegend=True
+)
+
+st.plotly_chart(fig, use_container_width=True)
 
 
 # Footer
 st.markdown("---")
-st.markdown("<p style='text-align:center; color:gray;'>© 2025, Luca Merlini</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; color:gray;'>© 2026, Luca Merlini</p>", unsafe_allow_html=True)
