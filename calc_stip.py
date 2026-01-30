@@ -262,7 +262,7 @@ def calcola_dettagli(
     # =========================
     # 12. NETTO BUSTA
     # =========================
-    netto_busta = imponibile - imposta_netta
+    netto_busta = imponibile - imposta_netta  + (premio_netto if premio_modalita=="flat" else 0)
 
     # =========================
     # 13. BUONI PASTO
@@ -273,7 +273,7 @@ def calcola_dettagli(
     # =========================
     # 14. NETTO TOTALE E MENSILE
     # =========================
-    netto_totale = netto_busta + buoni_annui + welfare + (premio_netto if premio_modalita=="flat" else 0)
+    netto_totale = netto_busta + buoni_annui + welfare
     netto_mensile = netto_busta / mensilita
 
     tasse_totali = imposta_lorda_totale
@@ -801,3 +801,4 @@ st.plotly_chart(fig, use_container_width=True)
 # Footer
 st.markdown("---")
 st.markdown("<p style='text-align:center; color:gray;'>© 2026, Luca Merlini</p>", unsafe_allow_html=True)
+
