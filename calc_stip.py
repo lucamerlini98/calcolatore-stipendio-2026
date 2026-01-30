@@ -313,7 +313,7 @@ st.set_page_config(
 
 # Titolo
 st.markdown(
-    "<h1 style='text-align: center;'>💸 Bella la RAL ma in busta che trovo?"
+    "<h1 style='text-align: center;'>💸 Bella la RAL ma in busta quanto trovo?"
     "<br><small>2026 Edition</small></h1>",
     unsafe_allow_html=True
 )
@@ -564,11 +564,11 @@ col2.metric(
 )
 
 st.divider()
-
-st.write(f"**Netto annuale in busta:** {dati['Stipendio Netto']:.2f} €")
-st.write(f"**Buoni pasto annui:** {dati['Buoni Pasto Annui']:.2f} €")
+st.write(f"**Reddito imponibile fiscale:** {dati['Reddito Imponibile Fiscale']:.2f} €")
+st.write(f"**Netto annuale:** {dati['Stipendio Netto']:.2f} €")
 st.write(f"**Tasse totali:** {dati['Tasse Totali']:.2f} €")
 st.write(f"**Detrazioni:** {dati['Detrazioni']:.2f} €")
+st.write(f"**Buoni pasto annui:** {dati['Buoni Pasto Annui']:.2f} €")
 st.write(
     f"**Fondo pensione totale:** {dati['Fondo Pensione Totale']:.2f} € "
     f"(Volontario + Datore)"
@@ -576,8 +576,7 @@ st.write(
 st.write(f"**TFR stimato:** {dati['TFR']:.2f} €")
 st.write(f"**Premio Netto:** {dati['Premio Netto']:.2f} €")
 st.write(f"**Welfare detassato:** {dati['Welfare']:.2f} €")
-st.write(f"**Reddito imponibile fiscale:** {dati['Reddito Imponibile Fiscale']:.2f} €")
-st.write(f"**Regione:** {dati['Regione']} — **Contratto:** {dati['Tipo Contratto']}")
+
 
 # -------------------------
 # Grafico
@@ -709,8 +708,8 @@ st.markdown("""
 
 Non tutto quello che ricevi dal tuo lavoro vale come denaro liquido:
 - 1€ in buoni pasto non vale come 1€ sul conto
-- 1€ nel fondo pensione vale di più fiscalmente, ma è meno liquido
-- il TFR è denaro futuro
+- 1€ in welfare ha valore, ma non è libero
+- 1€ in TFR o fondo pensione è tuo, ma non lo puoi usare oggi
 
 Qui puoi dire al sistema **quanto per te vale davvero 1€ in ciascuna voce**.
 Il risultato è un unico numero che rappresenta la **ricchezza reale generata dal lavoro**.
@@ -738,7 +737,7 @@ with col2:
 
 with col3:
     coeff_futuro = st.number_input(
-        "Valore fondo pensione + TFR (1€ = …)",
+        "Valore fondo pensione / TFR (1€ = …)",
         min_value=0.0,
         max_value=1.0,
         value=0.85,
@@ -801,4 +800,5 @@ st.plotly_chart(fig, use_container_width=True)
 # Footer
 st.markdown("---")
 st.markdown("<p style='text-align:center; color:gray;'>© 2026, Luca Merlini</p>", unsafe_allow_html=True)
+
 
