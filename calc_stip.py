@@ -596,7 +596,7 @@ col1.metric(
 
 col2.metric(
     "Buoni pasto + busta paga",
-    f"{(dati['Stipendio Netto con buoni']):.2f} €"
+    f"{(dati['Stipendio Netto con buoni']/mensilita):.2f} €"
 )
 
 st.divider()
@@ -857,6 +857,7 @@ st.plotly_chart(fig, use_container_width=True)
 # Footer
 st.markdown("---")
 st.markdown("<p style='text-align:center; color:gray;'>© 2026, Luca Merlini</p>", unsafe_allow_html=True)
+
 
 
 
